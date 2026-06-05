@@ -1,4 +1,16 @@
 import { useEffect, useState } from "react";
+import {
+    WiDaySunny,
+    WiCloud,
+    WiDayCloudy,
+    WiFog,
+    WiRain,
+    WiShowers,
+    WiThunderstorm,
+    WiSnow,
+    WiNightClear,
+    WiNightAltCloudy,
+} from "react-icons/wi";
 
 function useClock() {
     const [now, setNow] = useState(new Date());
@@ -27,12 +39,60 @@ function Card({ title, eyebrow, children, className = "" }) {
     );
 }
 
+function getWeatherIcon(condition = "", periodName = "") {
+    const text = condition.toLowerCase();
+    const isNight =
+        periodName.toLowerCase().includes("night") ||
+        periodName.toLowerCase().includes("tonight");
+
+    if (text.includes("thunder")) return <WiThunderstorm className="weather-icon storm" />;
+    if (text.includes("snow")) return <WiSnow className="weather-icon" />;
+    if (text.includes("fog") || text.includes("haze") || text.includes("smoke")) {
+        return <WiFog className="weather-icon" />;
+    }
+    if (text.includes("shower")) return <WiShowers className="weather-icon rain" />;
+    if (text.includes("rain") || text.includes("drizzle")) {
+        return <WiRain className="weather-icon rain" />;
+    }
+    if (text.includes("mostly clear") || text.includes("clear")) {
+        return isNight
+            ? <WiNightClear className="weather-icon night" />
+            : <WiDaySunny className="weather-icon sunny" />;
+    }
+    if (text.includes("partly cloudy") || text.includes("mostly sunny")) {
+        return isNight
+            ? <WiNightAltCloudy className="weather-icon cloud" />
+            : <WiDayCloudy className="weather-icon cloud" />;
+    }
+    if (text.includes("cloud") || text.includes("overcast")) {
+        return <WiCloud className="weather-icon cloud" />;
+    }
+
+    return isNight
+        ? <WiNightClear className="weather-icon night" />
+        : <WiDaySunny className="weather-icon sunny" />;
+}
+
 export default function App() {
     const now = useClock();
     const [system, setSystem] = useState(null);
     const [spotify, setSpotify] = useState(null);
     const [weather, setWeather] = useState(null);
     const [commute, setCommute] = useState(null);
+
+
+    async function sendSpotifyCommand(command, body) {
+        await fetch(`/api/spotify/${command}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: body ? JSON.stringify(body) : undefined,
+        });
+
+        const spotifyData = await fetchJson("/api/spotify");
+        setSpotify(spotifyData);
+    }
 
     useEffect(() => {
         async function load() {
@@ -116,11 +176,68 @@ export default function App() {
                     ) : null}
 
                     <p className="subtle">{spotify ?.device || ""}</p>
+
+                    <div className="spotify-controls">
+                        <button onClick={() => sendSpotifyCommand("previous")}>⏮</button>
+
+                        {spotify ?.isPlaying ? (
+                            <button onClick={() => sendSpotifyCommand("pause")}>⏸</button>
+                        ) : (
+                                <button onClick={() => sendSpotifyCommand("play")}>▶</button>
+                            )}
+
+                        <button onClick={() => sendSpotifyCommand("next")}>⏭</button>
+                    </div>
+
+                    <div className="volume-controls">
+                        <button
+                            onClick={() =>
+                                sendSpotifyCommand("volume", {
+                                    volume: Math.max(0, (spotify ?.volume ?? 50) - 10),
+                                })
+                            }
+                        >
+                            −
+  </button>
+
+                        <span>{spotify ?.volume ?? "--"}%</span>
+
+                        <button
+                            onClick={() =>
+                                sendSpotifyCommand("volume", {
+                                    volume: Math.min(100, (spotify ?.volume ?? 50) + 10),
+                                })
+                            }
+                        >
+                            +
+  </button>
+                    </div>
                 </Card>
 
-                <Card title="Weather" eyebrow="San Francisco">
-                    <p className="big">{weather ?.temperature || "--"}</p>
-                    <p className="muted">{weather ?.condition || "Loading..."}</p>
+                <Card title="Weather" eyebrow={weather ?.location || "Weather"}>
+                    <div className="weather-top">
+                        <div className="weather-icon-wrap">
+                            {getWeatherIcon(weather ?.condition)}
+                        </div>
+
+                        <div>
+                            <p className="big">{weather ?.temperature || "--"}</p>
+                            <p className="muted">{weather ?.condition || "Loading..."}</p>
+                            {weather ?.wind ? <p className="subtle">Wind: {weather.wind}</p> : null}
+                        </div>
+                    </div>
+
+                    {weather ?.nextPeriod ? (
+                        <div className="mini-panel">
+                            <p className="mini-label">{weather.nextPeriod.name}</p>
+                            <div className="next-period-row">
+                                {getWeatherIcon(weather.nextPeriod.condition, weather.nextPeriod.name)}
+                                <p className="mini-value">
+                                    {weather.nextPeriod.temperature} · {weather.nextPeriod.condition}
+                                </p>
+                            </div>
+                        </div>
+                    ) : null}
                 </Card>
 
                 <Card title="Commute" eyebrow="SF → San Jose">

@@ -1,6 +1,7 @@
 const express = require("express");
 const path = require("path");
 const os = require("os");
+const fs = require("fs");
 const { execSync } = require("child_process");
 require("dotenv").config();
 
@@ -89,6 +90,30 @@ async function refreshSpotifyAccessToken() {
     return data.access_token;
 }
 
+async function spotifyRequest(endpoint, options = {}) {
+    const accessToken = await refreshSpotifyAccessToken();
+
+    const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+        ...options,
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            ...(options.headers || {}),
+        },
+    });
+
+    if (!response.ok && response.status !== 204) {
+        const text = await response.text();
+        throw new Error(`Spotify request failed: ${response.status} ${text}`);
+    }
+
+    if (response.status === 204) {
+        return null;
+    }
+
+    return response.json();
+}
+
 app.get("/api/spotify/login", (req, res) => {
     const params = new URLSearchParams({
         client_id: process.env.SPOTIFY_CLIENT_ID,
@@ -132,11 +157,11 @@ app.get("/api/spotify/callback", async (req, res) => {
         inMemoryRefreshToken = data.refresh_token;
 
         res.send(`
-        <h1>Spotify connected ✅</h1>
-        <p>Copy this refresh token into your <code>.env</code> file:</p>
-        <pre style="white-space: pre-wrap; word-break: break-all;">SPOTIFY_REFRESH_TOKEN=${data.refresh_token}</pre>
-        <p>Then restart your server and visit <a href="/api/spotify">/api/spotify</a>.</p>
-      `);
+      <h1>Spotify connected ✅</h1>
+      <p>Copy this refresh token into your <code>.env</code> file:</p>
+      <pre style="white-space: pre-wrap; word-break: break-all;">SPOTIFY_REFRESH_TOKEN=${data.refresh_token}</pre>
+      <p>Then restart your server and visit <a href="/api/spotify">/api/spotify</a>.</p>
+    `);
     } catch (error) {
         console.error(error);
         res.status(500).send(error.message);
@@ -162,6 +187,9 @@ app.get("/api/spotify", async (req, res) => {
                 artist: "",
                 album: "",
                 albumArt: "",
+                progressMs: 0,
+                durationMs: 0,
+                volume: null,
             });
         }
 
@@ -178,20 +206,23 @@ app.get("/api/spotify", async (req, res) => {
 
         res.json({
             connected: true,
+            source: "spotify",
             isPlaying: data.is_playing,
             device: data.device ?.name || "Unknown device",
             title: item ?.name || "Unknown track",
             artist: item ?.artists ?.map((artist) => artist.name).join(", ") || "",
             album: item ?.album ?.name || "",
             albumArt: item ?.album ?.images ?.[0] ?.url || "",
-            progressMs: data.progress_ms,
-            durationMs: item ?.duration_ms,
+            progressMs: data.progress_ms || 0,
+            durationMs: item ?.duration_ms || 0,
+            volume: data.device ?.volume_percent ?? null,
         });
     } catch (error) {
         console.error(error);
 
         res.status(500).json({
             connected: false,
+            source: "spotify",
             device: "Bass Amp Pi",
             title: "Spotify auth needed",
             artist: "Visit /api/spotify/login",
@@ -201,12 +232,233 @@ app.get("/api/spotify", async (req, res) => {
     }
 });
 
-app.get("/api/weather", (req, res) => {
-    res.json({
-        location: "San Francisco",
-        temperature: "--",
-        condition: "Weather API coming soon",
+app.get("/api/raspotify", (req, res) => {
+    try {
+        const statePath =
+            process.env.RASPOTIFY_NOW_PLAYING_PATH ||
+            "/var/cache/raspotify/now-playing.json";
+
+        if (!fs.existsSync(statePath)) {
+            return res.json({
+                connected: false,
+                source: "raspotify",
+                isPlaying: false,
+                device: "Bass Amp Pi",
+                title: "No Raspotify state found",
+                artist: "",
+                album: "",
+                albumArt: "",
+            });
+        }
+
+        const raw = fs.readFileSync(statePath, "utf8").trim();
+
+        if (!raw) {
+            return res.json({
+                connected: false,
+                source: "raspotify",
+                isPlaying: false,
+                device: "Bass Amp Pi",
+                title: "No Raspotify playback yet",
+                artist: "",
+                album: "",
+                albumArt: "",
+            });
+        }
+
+        const data = JSON.parse(raw);
+
+        res.json({
+            connected: true,
+            source: "raspotify",
+            isPlaying: Boolean(data.isPlaying),
+            device: data.device || "Bass Amp Pi",
+            title: data.title || "Unknown track",
+            artist: data.artist || "",
+            album: data.album || "",
+            albumArt: data.albumArt || "",
+            trackId: data.trackId || "",
+            uri: data.uri || "",
+            progressMs: data.positionMs || 0,
+            durationMs: data.durationMs || 0,
+            updatedAt: data.updatedAt || null,
+            event: data.event || "",
+        });
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            connected: false,
+            source: "raspotify",
+            isPlaying: false,
+            device: "Bass Amp Pi",
+            title: "Raspotify state error",
+            artist: "",
+            album: "",
+            albumArt: "",
+            error: error.message,
+        });
+    }
+});
+
+app.post("/api/spotify/play", async (req, res) => {
+    try {
+        await spotifyRequest("/me/player/play", {
+            method: "PUT",
+        });
+
+        res.json({ ok: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post("/api/spotify/pause", async (req, res) => {
+    try {
+        await spotifyRequest("/me/player/pause", {
+            method: "PUT",
+        });
+
+        res.json({ ok: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post("/api/spotify/next", async (req, res) => {
+    try {
+        await spotifyRequest("/me/player/next", {
+            method: "POST",
+        });
+
+        res.json({ ok: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post("/api/spotify/previous", async (req, res) => {
+    try {
+        await spotifyRequest("/me/player/previous", {
+            method: "POST",
+        });
+
+        res.json({ ok: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+app.post("/api/spotify/volume", async (req, res) => {
+    try {
+        const volume = Number(req.body.volume);
+
+        if (!Number.isFinite(volume) || volume < 0 || volume > 100) {
+            return res.status(400).json({
+                ok: false,
+                error: "volume must be a number between 0 and 100",
+            });
+        }
+
+        await spotifyRequest(`/me/player/volume?volume_percent=${volume}`, {
+            method: "PUT",
+        });
+
+        res.json({ ok: true, volume });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+
+let cachedWeather = null;
+let cachedWeatherAt = 0;
+
+async function getWeather() {
+    const now = Date.now();
+    const cacheTtlMs = 10 * 60 * 1000;
+
+    if (cachedWeather && now - cachedWeatherAt < cacheTtlMs) {
+        return cachedWeather;
+    }
+
+    const lat = process.env.WEATHER_LAT || "37.7749";
+    const lon = process.env.WEATHER_LON || "-122.4194";
+    const locationLabel = process.env.WEATHER_LOCATION_LABEL || "San Francisco";
+
+    const userAgent = "home-lab-dashboard/1.0 (personal Raspberry Pi dashboard)";
+
+    const pointsResponse = await fetch(
+        `https://api.weather.gov/points/${lat},${lon}`,
+        {
+            headers: {
+                "User-Agent": userAgent,
+                Accept: "application/geo+json",
+            },
+        }
+    );
+
+    if (!pointsResponse.ok) {
+        throw new Error(`NWS points request failed: ${pointsResponse.status}`);
+    }
+
+    const pointsData = await pointsResponse.json();
+    const forecastUrl = pointsData.properties.forecast;
+
+    const forecastResponse = await fetch(forecastUrl, {
+        headers: {
+            "User-Agent": userAgent,
+            Accept: "application/geo+json",
+        },
     });
+
+    if (!forecastResponse.ok) {
+        throw new Error(`NWS forecast request failed: ${forecastResponse.status}`);
+    }
+
+    const forecastData = await forecastResponse.json();
+    const periods = forecastData.properties.periods || [];
+    const current = periods[0];
+    const next = periods[1];
+
+    cachedWeather = {
+        location: locationLabel,
+        temperature: current ? `${current.temperature}°${current.temperatureUnit}` : "--",
+        condition: current ?.shortForecast || "Unavailable",
+        detail: current ?.detailedForecast || "",
+        wind: current ? `${current.windSpeed} ${current.windDirection}` : "",
+        nextPeriod: next
+            ? {
+                name: next.name,
+                temperature: `${next.temperature}°${next.temperatureUnit}`,
+                condition: next.shortForecast,
+            }
+            : null,
+        updatedAt: new Date().toISOString(),
+    };
+
+    cachedWeatherAt = now;
+    return cachedWeather;
+}
+
+app.get("/api/weather", async (req, res) => {
+    try {
+        const weather = await getWeather();
+        res.json(weather);
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            location: process.env.WEATHER_LOCATION_LABEL || "San Francisco",
+            temperature: "--",
+            condition: "Weather unavailable",
+            detail: error.message,
+        });
+    }
 });
 
 app.get("/api/commute", (req, res) => {
