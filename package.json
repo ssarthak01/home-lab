@@ -1,0 +1,28 @@
+{
+  "name": "home-lab",
+  "version": "1.0.0",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "nodemon server/index.js",
+    "dev:client": "vite --host 0.0.0.0 --config client/vite.config.js",
+    "build": "vite build --config client/vite.config.js",
+    "start": "NODE_ENV=production node server/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.14",
+    "vite": "^8.0.16"
+  }
+}
