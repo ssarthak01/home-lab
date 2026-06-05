@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
     WiDaySunny,
     WiCloud,
@@ -45,41 +45,116 @@ function getWeatherIcon(condition = "", periodName = "") {
         periodName.toLowerCase().includes("night") ||
         periodName.toLowerCase().includes("tonight");
 
-    if (text.includes("thunder")) return <WiThunderstorm className="weather-icon storm" />;
-    if (text.includes("snow")) return <WiSnow className="weather-icon" />;
+    if (text.includes("thunder")) {
+        return <WiThunderstorm className="weather-icon storm" />;
+    }
+
+    if (text.includes("snow")) {
+        return <WiSnow className="weather-icon" />;
+    }
+
     if (text.includes("fog") || text.includes("haze") || text.includes("smoke")) {
         return <WiFog className="weather-icon" />;
     }
-    if (text.includes("shower")) return <WiShowers className="weather-icon rain" />;
+
+    if (text.includes("shower")) {
+        return <WiShowers className="weather-icon rain" />;
+    }
+
     if (text.includes("rain") || text.includes("drizzle")) {
         return <WiRain className="weather-icon rain" />;
     }
+
+    if (text.includes("sunny") || text.includes("fair")) {
+        return <WiDaySunny className="weather-icon sunny" />;
+    }
+
     if (text.includes("mostly clear") || text.includes("clear")) {
-        return isNight
-            ? <WiNightClear className="weather-icon night" />
-            : <WiDaySunny className="weather-icon sunny" />;
+        return isNight ? (
+            <WiNightClear className="weather-icon night" />
+        ) : (
+                <WiDaySunny className="weather-icon sunny" />
+            );
     }
+
     if (text.includes("partly cloudy") || text.includes("mostly sunny")) {
-        return isNight
-            ? <WiNightAltCloudy className="weather-icon cloud" />
-            : <WiDayCloudy className="weather-icon cloud" />;
+        return isNight ? (
+            <WiNightAltCloudy className="weather-icon cloud" />
+        ) : (
+                <WiDayCloudy className="weather-icon cloud" />
+            );
     }
+
     if (text.includes("cloud") || text.includes("overcast")) {
         return <WiCloud className="weather-icon cloud" />;
     }
 
-    return isNight
-        ? <WiNightClear className="weather-icon night" />
-        : <WiDaySunny className="weather-icon sunny" />;
+    return isNight ? (
+        <WiNightClear className="weather-icon night" />
+    ) : (
+            <WiDaySunny className="weather-icon sunny" />
+        );
+}
+
+function hasUsefulRaspotifyData(raspotify) {
+    if (!raspotify ?.connected) return false;
+    if (!raspotify ?.title) return false;
+    if (raspotify.title === "No Raspotify state found") return false;
+    if (raspotify.title === "No Raspotify playback yet") return false;
+    return true;
+}
+
+function formatMs(ms = 0) {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+    return `${minutes}:${seconds}`;
 }
 
 export default function App() {
     const now = useClock();
+
     const [system, setSystem] = useState(null);
     const [spotify, setSpotify] = useState(null);
+    const [raspotify, setRaspotify] = useState(null);
     const [weather, setWeather] = useState(null);
     const [commute, setCommute] = useState(null);
 
+    const displaySpotify = useMemo(() => {
+        if (hasUsefulRaspotifyData(raspotify)) {
+            return {
+                ...spotify,
+                ...raspotify,
+                source: "raspotify",
+                volume: spotify ?.volume ?? null,
+            };
+        }
+
+        return {
+            ...spotify,
+            source: spotify ?.source || "spotify",
+        };
+    }, [spotify, raspotify]);
+
+    async function loadDashboardData() {
+        const [systemData, spotifyData, raspotifyData, weatherData, commuteData] =
+            await Promise.all([
+                fetchJson("/api/system"),
+                fetchJson("/api/spotify"),
+                fetchJson("/api/raspotify").catch(() => ({
+                    connected: false,
+                    source: "raspotify",
+                })),
+                fetchJson("/api/weather"),
+                fetchJson("/api/commute"),
+            ]);
+
+        setSystem(systemData);
+        setSpotify(spotifyData);
+        setRaspotify(raspotifyData);
+        setWeather(weatherData);
+        setCommute(commuteData);
+    }
 
     async function sendSpotifyCommand(command, body) {
         await fetch(`/api/spotify/${command}`, {
@@ -90,34 +165,28 @@ export default function App() {
             body: body ? JSON.stringify(body) : undefined,
         });
 
-        const spotifyData = await fetchJson("/api/spotify");
-        setSpotify(spotifyData);
+        await loadDashboardData();
     }
 
     useEffect(() => {
-        async function load() {
-            const [systemData, spotifyData, weatherData, commuteData] =
-                await Promise.all([
-                    fetchJson("/api/system"),
-                    fetchJson("/api/spotify"),
-                    fetchJson("/api/weather"),
-                    fetchJson("/api/commute"),
-                ]);
-
-            setSystem(systemData);
-            setSpotify(spotifyData);
-            setWeather(weatherData);
-            setCommute(commuteData);
-        }
-
-        load().catch(console.error);
+        loadDashboardData().catch(console.error);
 
         const timer = setInterval(() => {
-            load().catch(console.error);
-        }, 30000);
+            loadDashboardData().catch(console.error);
+        }, 10000);
 
         return () => clearInterval(timer);
     }, []);
+
+    const progressPercent =
+        displaySpotify ?.durationMs && displaySpotify ?.progressMs
+            ? Math.min(
+                100,
+                Math.round(
+                    (displaySpotify.progressMs / displaySpotify.durationMs) * 100
+                )
+            )
+            : 0;
 
     return (
         <main className="page">
@@ -147,35 +216,45 @@ export default function App() {
 
             <section className="grid">
                 <Card
-                    title={spotify ?.isPlaying ? "Now Playing" : "Paused"}
-                    eyebrow="Spotify"
+                    title={displaySpotify ?.isPlaying ? "Now Playing" : "Paused"}
+                    eyebrow={
+                        displaySpotify ?.source === "raspotify"
+                            ? "Raspotify"
+                            : "Spotify"
+          }
                     className="spotify-card"
                 >
-                    {spotify ?.albumArt ? (
-                        <img className="album-art-img" src={spotify.albumArt} alt={spotify.album || "Album art"} />
+                    {displaySpotify ?.albumArt ? (
+                        <img
+                            className="album-art-img"
+                            src={displaySpotify.albumArt}
+                            alt={displaySpotify.album || "Album art"}
+                        />
                     ) : (
                             <div className="album-art">♪</div>
                         )}
 
-                    <p className="big">{spotify ?.title || "Loading..."}</p>
-                    <p className="muted">{spotify ?.artist || ""}</p>
-                    <p className="subtle">{spotify ?.album || ""}</p>
+                    <p className="big">{displaySpotify ?.title || "Loading..."}</p>
+                    <p className="muted">{displaySpotify ?.artist || ""}</p>
+                    <p className="subtle">{displaySpotify ?.album || ""}</p>
 
-                    {spotify ?.durationMs ? (
-                        <div className="progress-wrap">
-                            <div
-                                className="progress-bar"
-                                style={{
-                                    width: `${Math.min(
-                                        100,
-                                        Math.round((spotify.progressMs / spotify.durationMs) * 100)
-                                    )}%`,
-                                }}
-                            />
-                        </div>
+                    {displaySpotify ?.durationMs ? (
+                        <>
+                            <div className="progress-wrap">
+                                <div
+                                    className="progress-bar"
+                                    style={{
+                                        width: `${progressPercent}%`,
+                                    }}
+                                />
+                            </div>
+
+                            <p className="subtle">
+                                {formatMs(displaySpotify.progressMs)} /{" "}
+                                {formatMs(displaySpotify.durationMs)}
+                            </p>
+                        </>
                     ) : null}
-
-                    <p className="subtle">{spotify ?.device || ""}</p>
 
                     <div className="spotify-controls">
                         <button onClick={() => sendSpotifyCommand("previous")}>⏮</button>
@@ -198,7 +277,7 @@ export default function App() {
                             }
                         >
                             −
-  </button>
+            </button>
 
                         <span>{spotify ?.volume ?? "--"}%</span>
 
@@ -210,8 +289,15 @@ export default function App() {
                             }
                         >
                             +
-  </button>
+            </button>
                     </div>
+
+                    <p className="subtle">
+                        {displaySpotify ?.device || "Bass Amp Pi"}
+                        {displaySpotify ?.source === "raspotify"
+                            ? " · local speaker state"
+                            : ""}
+                    </p>
                 </Card>
 
                 <Card title="Weather" eyebrow={weather ?.location || "Weather"}>
@@ -223,7 +309,9 @@ export default function App() {
                         <div>
                             <p className="big">{weather ?.temperature || "--"}</p>
                             <p className="muted">{weather ?.condition || "Loading..."}</p>
-                            {weather ?.wind ? <p className="subtle">Wind: {weather.wind}</p> : null}
+                            {weather ?.wind ? (
+                                <p className="subtle">Wind: {weather.wind}</p>
+                            ) : null}
                         </div>
                     </div>
 
@@ -231,9 +319,13 @@ export default function App() {
                         <div className="mini-panel">
                             <p className="mini-label">{weather.nextPeriod.name}</p>
                             <div className="next-period-row">
-                                {getWeatherIcon(weather.nextPeriod.condition, weather.nextPeriod.name)}
+                                {getWeatherIcon(
+                                    weather.nextPeriod.condition,
+                                    weather.nextPeriod.name
+                                )}
                                 <p className="mini-value">
-                                    {weather.nextPeriod.temperature} · {weather.nextPeriod.condition}
+                                    {weather.nextPeriod.temperature} ·{" "}
+                                    {weather.nextPeriod.condition}
                                 </p>
                             </div>
                         </div>
