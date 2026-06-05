@@ -86,10 +86,35 @@ export default function App() {
             </header>
 
             <section className="grid">
-                <Card title="Bass Amp" eyebrow="Spotify" className="spotify-card">
-                    <div className="album-art">♪</div>
+                <Card
+                    title={spotify ?.isPlaying ? "Now Playing" : "Paused"}
+                    eyebrow="Spotify"
+                    className="spotify-card"
+                >
+                    {spotify ?.albumArt ? (
+                        <img className="album-art-img" src={spotify.albumArt} alt={spotify.album || "Album art"} />
+                    ) : (
+                            <div className="album-art">♪</div>
+                        )}
+
                     <p className="big">{spotify ?.title || "Loading..."}</p>
                     <p className="muted">{spotify ?.artist || ""}</p>
+                    <p className="subtle">{spotify ?.album || ""}</p>
+
+                    {spotify ?.durationMs ? (
+                        <div className="progress-wrap">
+                            <div
+                                className="progress-bar"
+                                style={{
+                                    width: `${Math.min(
+                                        100,
+                                        Math.round((spotify.progressMs / spotify.durationMs) * 100)
+                                    )}%`,
+                                }}
+                            />
+                        </div>
+                    ) : null}
+
                     <p className="subtle">{spotify ?.device || ""}</p>
                 </Card>
 

@@ -103,6 +103,35 @@
     font-size: 34px;
     letter-spacing: -0.04em;
   }
+
+  .album-art-img {
+    display: block;
+    width: min(34vw, 320px);
+    aspect-ratio: 1;
+    object-fit: cover;
+    margin-bottom: 28px;
+    border-radius: 32px;
+    box-shadow:
+      0 24px 80px rgba(0, 0, 0, 0.35),
+      0 0 80px rgba(34, 197, 94, 0.16);
+  }
+  
+  .progress-wrap {
+    width: 100%;
+    height: 10px;
+    margin-top: 22px;
+    margin-bottom: 14px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.22);
+  }
+  
+  .progress-bar {
+    height: 100%;
+    border-radius: inherit;
+    background: #22c55e;
+    box-shadow: 0 0 18px rgba(34, 197, 94, 0.7);
+  }
   
   .album-art {
     display: grid;

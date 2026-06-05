@@ -46,13 +46,159 @@ app.get("/api/system", (req, res) => {
     });
 });
 
-app.get("/api/spotify", (req, res) => {
-    res.json({
-        device: "Bass Amp Pi",
-        title: "Spotify integration coming soon",
-        artist: "Raspotify is working",
-        state: "placeholder",
+const SPOTIFY_SCOPES = [
+    "user-read-currently-playing",
+    "user-read-playback-state",
+    "user-modify-playback-state",
+].join(" ");
+
+let inMemoryRefreshToken = process.env.SPOTIFY_REFRESH_TOKEN || "";
+
+function getSpotifyBasicAuthHeader() {
+    const raw = `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`;
+    return `Basic ${Buffer.from(raw).toString("base64")}`;
+}
+
+async function refreshSpotifyAccessToken() {
+    const refreshToken = inMemoryRefreshToken || process.env.SPOTIFY_REFRESH_TOKEN;
+
+    if (!refreshToken) {
+        throw new Error("Missing SPOTIFY_REFRESH_TOKEN. Visit /api/spotify/login first.");
+    }
+
+    const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
     });
+
+    const response = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: {
+            Authorization: getSpotifyBasicAuthHeader(),
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body,
+    });
+
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Spotify token refresh failed: ${response.status} ${text}`);
+    }
+
+    const data = await response.json();
+    return data.access_token;
+}
+
+app.get("/api/spotify/login", (req, res) => {
+    const params = new URLSearchParams({
+        client_id: process.env.SPOTIFY_CLIENT_ID,
+        response_type: "code",
+        redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+        scope: SPOTIFY_SCOPES,
+    });
+
+    res.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);
+});
+
+app.get("/api/spotify/callback", async (req, res) => {
+    try {
+        const code = req.query.code;
+
+        if (!code) {
+            return res.status(400).send("Missing Spotify authorization code.");
+        }
+
+        const body = new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+        });
+
+        const response = await fetch("https://accounts.spotify.com/api/token", {
+            method: "POST",
+            headers: {
+                Authorization: getSpotifyBasicAuthHeader(),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body,
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            return res.status(response.status).send(`Spotify callback failed: ${text}`);
+        }
+
+        const data = await response.json();
+        inMemoryRefreshToken = data.refresh_token;
+
+        res.send(`
+        <h1>Spotify connected ✅</h1>
+        <p>Copy this refresh token into your <code>.env</code> file:</p>
+        <pre style="white-space: pre-wrap; word-break: break-all;">SPOTIFY_REFRESH_TOKEN=${data.refresh_token}</pre>
+        <p>Then restart your server and visit <a href="/api/spotify">/api/spotify</a>.</p>
+      `);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.get("/api/spotify", async (req, res) => {
+    try {
+        const accessToken = await refreshSpotifyAccessToken();
+
+        const response = await fetch("https://api.spotify.com/v1/me/player", {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+            },
+        });
+
+        if (response.status === 204) {
+            return res.json({
+                connected: true,
+                isPlaying: false,
+                device: "No active Spotify playback",
+                title: "Nothing playing",
+                artist: "",
+                album: "",
+                albumArt: "",
+            });
+        }
+
+        if (!response.ok) {
+            const text = await response.text();
+            return res.status(response.status).json({
+                connected: false,
+                error: `Spotify playback fetch failed: ${response.status} ${text}`,
+            });
+        }
+
+        const data = await response.json();
+        const item = data.item;
+
+        res.json({
+            connected: true,
+            isPlaying: data.is_playing,
+            device: data.device ?.name || "Unknown device",
+            title: item ?.name || "Unknown track",
+            artist: item ?.artists ?.map((artist) => artist.name).join(", ") || "",
+            album: item ?.album ?.name || "",
+            albumArt: item ?.album ?.images ?.[0] ?.url || "",
+            progressMs: data.progress_ms,
+            durationMs: item ?.duration_ms,
+        });
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            connected: false,
+            device: "Bass Amp Pi",
+            title: "Spotify auth needed",
+            artist: "Visit /api/spotify/login",
+            state: "error",
+            error: error.message,
+        });
+    }
 });
 
 app.get("/api/weather", (req, res) => {
