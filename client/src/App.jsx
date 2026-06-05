@@ -10,6 +10,7 @@ import {
     WiSnow,
     WiNightClear,
     WiNightAltCloudy,
+    WiSunset,
 } from "react-icons/wi";
 
 function useClock() {
@@ -65,8 +66,20 @@ function getWeatherIcon(condition = "", periodName = "") {
         return <WiRain className="weather-icon rain" />;
     }
 
-    if (text.includes("sunny") || text.includes("fair")) {
-        return <WiDaySunny className="weather-icon sunny" />;
+    if (text.includes("partly cloudy")) {
+        return isNight ? (
+            <WiNightAltCloudy className="weather-icon cloud" />
+        ) : (
+                <WiDayCloudy className="weather-icon cloud" />
+            );
+    }
+
+    if (text.includes("mostly sunny") || text.includes("sunny") || text.includes("fair")) {
+        return isNight ? (
+            <WiNightClear className="weather-icon night" />
+        ) : (
+                <WiDaySunny className="weather-icon sunny" />
+            );
     }
 
     if (text.includes("mostly clear") || text.includes("clear")) {
@@ -77,16 +90,12 @@ function getWeatherIcon(condition = "", periodName = "") {
             );
     }
 
-    if (text.includes("partly cloudy") || text.includes("mostly sunny")) {
+    if (text.includes("cloud") || text.includes("overcast")) {
         return isNight ? (
             <WiNightAltCloudy className="weather-icon cloud" />
         ) : (
-                <WiDayCloudy className="weather-icon cloud" />
+                <WiCloud className="weather-icon cloud" />
             );
-    }
-
-    if (text.includes("cloud") || text.includes("overcast")) {
-        return <WiCloud className="weather-icon cloud" />;
     }
 
     return isNight ? (
@@ -94,6 +103,14 @@ function getWeatherIcon(condition = "", periodName = "") {
     ) : (
             <WiDaySunny className="weather-icon sunny" />
         );
+}
+
+function getWeatherIconForHour(hour) {
+    if (hour ?.isSunsetHour) {
+        return <WiSunset className="weather-icon sunset" />;
+    }
+
+    return getWeatherIcon(hour ?.condition, hour ?.isNight ? "night" : "");
 }
 
 function hasUsefulRaspotifyData(raspotify) {
@@ -131,8 +148,20 @@ function getEstimatedProgressMs(track) {
     return Math.min(track.durationMs, baseProgress + Math.max(0, elapsedMs));
 }
 
+function formatHour(isoTime) {
+    if (!isoTime) return "--";
+
+    return new Date(isoTime).toLocaleTimeString([], {
+        hour: "numeric",
+    });
+}
+
 export default function App() {
     const now = useClock();
+
+    const [theme, setTheme] = useState(() => {
+        return localStorage.getItem("dashboard-theme") || "light";
+    });
 
     const [system, setSystem] = useState(null);
     const [spotify, setSpotify] = useState(null);
@@ -140,6 +169,10 @@ export default function App() {
     const [weather, setWeather] = useState(null);
     const [commute, setCommute] = useState(null);
     const [progressTick, setProgressTick] = useState(0);
+
+    useEffect(() => {
+        localStorage.setItem("dashboard-theme", theme);
+    }, [theme]);
 
     const displaySpotify = useMemo(() => {
         if (hasUsefulRaspotifyData(raspotify)) {
@@ -248,8 +281,8 @@ export default function App() {
         : 0;
 
     return (
-        <main className="page">
-            <header className="hero">
+        <main className={`page ${theme}`}>
+            <header className="hero compact-hero">
                 <div>
                     <p className="kicker">Raspberry Pi Command Center</p>
                     <h1>
@@ -267,97 +300,105 @@ export default function App() {
                     </p>
                 </div>
 
-                <div className="live-pill">
-                    <span className="dot" />
-                    Live on Bass Amp Pi
-        </div>
+                <div className="header-actions">
+                    <button
+                        className="theme-toggle"
+                        onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+                    >
+                        {theme === "light" ? "Dark mode" : "Light mode"}
+                    </button>
+
+                    <div className="live-pill">
+                        <span className="dot" />
+                        Live on Bass Amp Pi
+          </div>
+                </div>
             </header>
 
-            <section className="grid">
+            <section className="grid compact-grid">
                 <Card
                     title={displaySpotify ?.isPlaying ? "Now Playing" : "Paused"}
-                    eyebrow={
-                        displaySpotify ?.source === "raspotify" ? "Raspotify" : "Spotify"
-          }
-                    className="spotify-card"
+                    eyebrow={displaySpotify ?.source === "raspotify" ? "Raspotify" : "Spotify"}
+                    className="spotify-card compact-spotify"
                 >
-                    {displaySpotify ?.albumArt ? (
-                        <img
-                            className="album-art-img"
-                            src={displaySpotify.albumArt}
-                            alt={displaySpotify.album || "Album art"}
-                        />
-                    ) : (
-                            <div className="album-art">♪</div>
-                        )}
+                    <div className="spotify-layout">
+                        {displaySpotify ?.albumArt ? (
+                            <img
+                                className="album-art-img compact-album"
+                                src={displaySpotify.albumArt}
+                                alt={displaySpotify.album || "Album art"}
+                            />
+                        ) : (
+                                <div className="album-art compact-album">♪</div>
+                            )}
 
-                    <p className="big">{displaySpotify ?.title || "Loading..."}</p>
-                    <p className="muted">{displaySpotify ?.artist || ""}</p>
-                    <p className="subtle">{displaySpotify ?.album || ""}</p>
+                        <div className="spotify-details">
+                            <p className="big track-title">{displaySpotify ?.title || "Loading..."}</p>
+                            <p className="muted">{displaySpotify ?.artist || ""}</p>
+                            <p className="subtle">{displaySpotify ?.album || ""}</p>
 
-                    {displaySpotify ?.durationMs ? (
-                        <>
-                            <div className="progress-wrap">
-                                <div
-                                    className="progress-bar"
-                                    style={{
-                                        width: `${progressPercent}%`,
-                                    }}
-                                />
+                            {displaySpotify ?.durationMs ? (
+                                <>
+                                    <div className="progress-wrap">
+                                        <div
+                                            className="progress-bar"
+                                            style={{
+                                                width: `${progressPercent}%`,
+                                            }}
+                                        />
+                                    </div>
+
+                                    <p className="subtle">
+                                        {formatMs(estimatedProgressMs)} / {formatMs(displaySpotify.durationMs)}
+                                    </p>
+                                </>
+                            ) : null}
+
+                            <div className="spotify-controls">
+                                <button onClick={() => sendSpotifyCommand("previous")}>⏮</button>
+
+                                {spotify ?.isPlaying ? (
+                                    <button onClick={() => sendSpotifyCommand("pause")}>⏸</button>
+                                ) : (
+                                        <button onClick={() => sendSpotifyCommand("play")}>▶</button>
+                                    )}
+
+                                <button onClick={() => sendSpotifyCommand("next")}>⏭</button>
+                            </div>
+
+                            <div className="volume-controls">
+                                <button
+                                    onClick={() =>
+                                        sendSpotifyCommand("volume", {
+                                            volume: Math.max(0, (spotify ?.volume ?? 50) - 10),
+                                        })
+                                    }
+                                >
+                                    −
+                </button>
+
+                                <span>{spotify ?.volume ?? "--"}%</span>
+
+                                <button
+                                    onClick={() =>
+                                        sendSpotifyCommand("volume", {
+                                            volume: Math.min(100, (spotify ?.volume ?? 50) + 10),
+                                        })
+                                    }
+                                >
+                                    +
+                </button>
                             </div>
 
                             <p className="subtle">
-                                {formatMs(estimatedProgressMs)} /{" "}
-                                {formatMs(displaySpotify.durationMs)}
+                                {displaySpotify ?.device || "Bass Amp Pi"}
+                                {displaySpotify ?.source === "raspotify" ? " · local speaker state" : ""}
                             </p>
-                        </>
-                    ) : null}
-
-                    <div className="spotify-controls">
-                        <button onClick={() => sendSpotifyCommand("previous")}>⏮</button>
-
-                        {spotify ?.isPlaying ? (
-                            <button onClick={() => sendSpotifyCommand("pause")}>⏸</button>
-                        ) : (
-                                <button onClick={() => sendSpotifyCommand("play")}>▶</button>
-                            )}
-
-                        <button onClick={() => sendSpotifyCommand("next")}>⏭</button>
+                        </div>
                     </div>
-
-                    <div className="volume-controls">
-                        <button
-                            onClick={() =>
-                                sendSpotifyCommand("volume", {
-                                    volume: Math.max(0, (spotify ?.volume ?? 50) - 10),
-                                })
-                            }
-                        >
-                            −
-            </button>
-
-                        <span>{spotify ?.volume ?? "--"}%</span>
-
-                        <button
-                            onClick={() =>
-                                sendSpotifyCommand("volume", {
-                                    volume: Math.min(100, (spotify ?.volume ?? 50) + 10),
-                                })
-                            }
-                        >
-                            +
-            </button>
-                    </div>
-
-                    <p className="subtle">
-                        {displaySpotify ?.device || "Bass Amp Pi"}
-                        {displaySpotify ?.source === "raspotify"
-                            ? " · local speaker state"
-                            : ""}
-                    </p>
                 </Card>
 
-                <Card title="Weather" eyebrow={weather ?.location || "Weather"}>
+                <Card title="Weather" eyebrow={weather ?.location || "Weather"} className="weather-card">
                     <div className="weather-top">
                         <div className="weather-icon-wrap">
                             {getWeatherIcon(weather ?.condition)}
@@ -366,11 +407,37 @@ export default function App() {
                         <div>
                             <p className="big">{weather ?.temperature || "--"}</p>
                             <p className="muted">{weather ?.condition || "Loading..."}</p>
+
+                            <div className="weather-high-low">
+                                <span>H: {weather ?.high || "--"}</span>
+                                <span>L: {weather ?.low || "--"}</span>
+                            </div>
+
                             {weather ?.wind ? (
                                 <p className="subtle">Wind: {weather.wind}</p>
                             ) : null}
                         </div>
                     </div>
+
+                    {weather ?.hourlyForecast ?.length ? (
+                        <div className="hourly-forecast">
+                            {weather.hourlyForecast.map((hour) => (
+                                <div className="hour-card" key={hour.time}>
+                                    <div className="hour-time-wrap">
+                                        <p className="hour-time">{formatHour(hour.time)}</p>
+                                        {hour.isSunsetHour ? <p className="hour-event">Sunset</p> : null}
+                                    </div>
+
+                                    {getWeatherIconForHour(hour)}
+                                    <p className="hour-temp">{hour.temperature}</p>
+
+                                    {hour.precipitationChance ? (
+                                        <p className="hour-rain">{hour.precipitationChance}%</p>
+                                    ) : null}
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
 
                     {weather ?.nextPeriod ? (
                         <div className="mini-panel">
@@ -381,8 +448,7 @@ export default function App() {
                                     weather.nextPeriod.name
                                 )}
                                 <p className="mini-value">
-                                    {weather.nextPeriod.temperature} ·{" "}
-                                    {weather.nextPeriod.condition}
+                                    {weather.nextPeriod.temperature} · {weather.nextPeriod.condition}
                                 </p>
                             </div>
                         </div>

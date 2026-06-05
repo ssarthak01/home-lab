@@ -2,6 +2,7 @@ const express = require("express");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
+const SunCalc = require("suncalc");
 const { execSync } = require("child_process");
 require("dotenv").config();
 
@@ -181,6 +182,7 @@ app.get("/api/spotify", async (req, res) => {
         if (response.status === 204) {
             return res.json({
                 connected: true,
+                source: "spotify",
                 isPlaying: false,
                 device: "No active Spotify playback",
                 title: "Nothing playing",
@@ -197,6 +199,7 @@ app.get("/api/spotify", async (req, res) => {
             const text = await response.text();
             return res.status(response.status).json({
                 connected: false,
+                source: "spotify",
                 error: `Spotify playback fetch failed: ${response.status} ${text}`,
             });
         }
@@ -216,6 +219,7 @@ app.get("/api/spotify", async (req, res) => {
             progressMs: data.progress_ms || 0,
             durationMs: item ?.duration_ms || 0,
             volume: data.device ?.volume_percent ?? null,
+            updatedAt: new Date().toISOString(),
         });
     } catch (error) {
         console.error(error);
@@ -388,7 +392,25 @@ async function getWeather() {
 
     const lat = process.env.WEATHER_LAT || "37.7749";
     const lon = process.env.WEATHER_LON || "-122.4194";
+    const latNum = Number(lat);
+    const lonNum = Number(lon);
     const locationLabel = process.env.WEATHER_LOCATION_LABEL || "San Francisco";
+
+    function getSunInfoForHour(isoTime) {
+        const start = new Date(isoTime);
+        const end = new Date(start.getTime() + 60 * 60 * 1000);
+        const sunTimes = SunCalc.getTimes(start, latNum, lonNum);
+
+        const sunrise = sunTimes.sunrise;
+        const sunset = sunTimes.sunset;
+
+        return {
+            isNight: start < sunrise || start >= sunset,
+            isSunsetHour: sunset >= start && sunset < end,
+            sunriseTime: sunrise.toISOString(),
+            sunsetTime: sunset.toISOString(),
+        };
+    }
 
     const userAgent = "home-lab-dashboard/1.0 (personal Raspberry Pi dashboard)";
 
@@ -408,22 +430,58 @@ async function getWeather() {
 
     const pointsData = await pointsResponse.json();
     const forecastUrl = pointsData.properties.forecast;
+    const hourlyForecastUrl = pointsData.properties.forecastHourly;
 
-    const forecastResponse = await fetch(forecastUrl, {
-        headers: {
-            "User-Agent": userAgent,
-            Accept: "application/geo+json",
-        },
-    });
+    const [forecastResponse, hourlyResponse] = await Promise.all([
+        fetch(forecastUrl, {
+            headers: {
+                "User-Agent": userAgent,
+                Accept: "application/geo+json",
+            },
+        }),
+        fetch(hourlyForecastUrl, {
+            headers: {
+                "User-Agent": userAgent,
+                Accept: "application/geo+json",
+            },
+        }),
+    ]);
 
     if (!forecastResponse.ok) {
         throw new Error(`NWS forecast request failed: ${forecastResponse.status}`);
     }
 
+    if (!hourlyResponse.ok) {
+        throw new Error(`NWS hourly forecast request failed: ${hourlyResponse.status}`);
+    }
+
     const forecastData = await forecastResponse.json();
+    const hourlyData = await hourlyResponse.json();
+
     const periods = forecastData.properties.periods || [];
+    const hourlyPeriods = hourlyData.properties.periods || [];
+
     const current = periods[0];
     const next = periods[1];
+
+    const todayDayPeriod = periods.find((period) => period.isDaytime);
+    const tonightPeriod = periods.find((period) => !period.isDaytime);
+
+    const hourlyForecast = hourlyPeriods.slice(0, 12).map((period) => {
+        const sunInfo = getSunInfoForHour(period.startTime);
+
+        return {
+            time: period.startTime,
+            temperature: `${period.temperature}°${period.temperatureUnit}`,
+            condition: period.shortForecast,
+            wind: `${period.windSpeed} ${period.windDirection}`,
+            precipitationChance: period.probabilityOfPrecipitation ?.value ?? null,
+            isNight: sunInfo.isNight,
+            isSunsetHour: sunInfo.isSunsetHour,
+            sunriseTime: sunInfo.sunriseTime,
+            sunsetTime: sunInfo.sunsetTime,
+        };
+    });
 
     cachedWeather = {
         location: locationLabel,
@@ -431,6 +489,12 @@ async function getWeather() {
         condition: current ?.shortForecast || "Unavailable",
         detail: current ?.detailedForecast || "",
         wind: current ? `${current.windSpeed} ${current.windDirection}` : "",
+        high: todayDayPeriod
+            ? `${todayDayPeriod.temperature}°${todayDayPeriod.temperatureUnit}`
+            : null,
+        low: tonightPeriod
+            ? `${tonightPeriod.temperature}°${tonightPeriod.temperatureUnit}`
+            : null,
         nextPeriod: next
             ? {
                 name: next.name,
@@ -438,6 +502,7 @@ async function getWeather() {
                 condition: next.shortForecast,
             }
             : null,
+        hourlyForecast,
         updatedAt: new Date().toISOString(),
     };
 
