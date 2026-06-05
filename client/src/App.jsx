@@ -105,10 +105,30 @@ function hasUsefulRaspotifyData(raspotify) {
 }
 
 function formatMs(ms = 0) {
-    const totalSeconds = Math.floor(ms / 1000);
+    const safeMs = Number.isFinite(ms) ? Math.max(0, ms) : 0;
+    const totalSeconds = Math.floor(safeMs / 1000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = String(totalSeconds % 60).padStart(2, "0");
     return `${minutes}:${seconds}`;
+}
+
+function getEstimatedProgressMs(track) {
+    if (!track ?.durationMs) return 0;
+
+    const baseProgress = track.progressMs || 0;
+
+    if (!track.isPlaying || !track.updatedAt) {
+        return baseProgress;
+    }
+
+    const updatedAtMs = new Date(track.updatedAt).getTime();
+
+    if (!Number.isFinite(updatedAtMs)) {
+        return baseProgress;
+    }
+
+    const elapsedMs = Date.now() - updatedAtMs;
+    return Math.min(track.durationMs, baseProgress + Math.max(0, elapsedMs));
 }
 
 export default function App() {
@@ -119,6 +139,7 @@ export default function App() {
     const [raspotify, setRaspotify] = useState(null);
     const [weather, setWeather] = useState(null);
     const [commute, setCommute] = useState(null);
+    const [progressTick, setProgressTick] = useState(0);
 
     const displaySpotify = useMemo(() => {
         if (hasUsefulRaspotifyData(raspotify)) {
@@ -136,24 +157,37 @@ export default function App() {
         };
     }, [spotify, raspotify]);
 
-    async function loadDashboardData() {
-        const [systemData, spotifyData, raspotifyData, weatherData, commuteData] =
-            await Promise.all([
-                fetchJson("/api/system"),
-                fetchJson("/api/spotify"),
-                fetchJson("/api/raspotify").catch(() => ({
-                    connected: false,
-                    source: "raspotify",
-                })),
-                fetchJson("/api/weather"),
-                fetchJson("/api/commute"),
-            ]);
+    async function loadStaticData() {
+        const [systemData, weatherData, commuteData] = await Promise.all([
+            fetchJson("/api/system"),
+            fetchJson("/api/weather"),
+            fetchJson("/api/commute"),
+        ]);
 
         setSystem(systemData);
-        setSpotify(spotifyData);
-        setRaspotify(raspotifyData);
         setWeather(weatherData);
         setCommute(commuteData);
+    }
+
+    async function loadSpotifyData() {
+        const spotifyData = await fetchJson("/api/spotify");
+        setSpotify(spotifyData);
+    }
+
+    async function loadRaspotifyData() {
+        const raspotifyData = await fetchJson("/api/raspotify");
+
+        if (hasUsefulRaspotifyData(raspotifyData)) {
+            setRaspotify(raspotifyData);
+        }
+    }
+
+    async function loadAllDashboardData() {
+        await Promise.all([
+            loadStaticData(),
+            loadSpotifyData().catch(console.error),
+            loadRaspotifyData().catch(console.error),
+        ]);
     }
 
     async function sendSpotifyCommand(command, body) {
@@ -165,28 +199,53 @@ export default function App() {
             body: body ? JSON.stringify(body) : undefined,
         });
 
-        await loadDashboardData();
+        await Promise.all([
+            loadSpotifyData().catch(console.error),
+            loadRaspotifyData().catch(console.error),
+        ]);
     }
 
     useEffect(() => {
-        loadDashboardData().catch(console.error);
+        loadAllDashboardData().catch(console.error);
 
+        const raspotifyTimer = setInterval(() => {
+            loadRaspotifyData().catch(console.error);
+        }, 1000);
+
+        const spotifyTimer = setInterval(() => {
+            loadSpotifyData().catch(console.error);
+        }, 5000);
+
+        const staticTimer = setInterval(() => {
+            loadStaticData().catch(console.error);
+        }, 60000);
+
+        return () => {
+            clearInterval(raspotifyTimer);
+            clearInterval(spotifyTimer);
+            clearInterval(staticTimer);
+        };
+    }, []);
+
+    useEffect(() => {
         const timer = setInterval(() => {
-            loadDashboardData().catch(console.error);
-        }, 10000);
+            setProgressTick((tick) => tick + 1);
+        }, 1000);
 
         return () => clearInterval(timer);
     }, []);
 
-    const progressPercent =
-        displaySpotify ?.durationMs && displaySpotify ?.progressMs
-            ? Math.min(
-                100,
-                Math.round(
-                    (displaySpotify.progressMs / displaySpotify.durationMs) * 100
-                )
-            )
-            : 0;
+    const estimatedProgressMs = useMemo(() => {
+        progressTick;
+        return getEstimatedProgressMs(displaySpotify);
+    }, [displaySpotify, progressTick]);
+
+    const progressPercent = displaySpotify ?.durationMs
+        ? Math.min(
+            100,
+            Math.round((estimatedProgressMs / displaySpotify.durationMs) * 100)
+        )
+        : 0;
 
     return (
         <main className="page">
@@ -218,9 +277,7 @@ export default function App() {
                 <Card
                     title={displaySpotify ?.isPlaying ? "Now Playing" : "Paused"}
                     eyebrow={
-                        displaySpotify ?.source === "raspotify"
-                            ? "Raspotify"
-                            : "Spotify"
+                        displaySpotify ?.source === "raspotify" ? "Raspotify" : "Spotify"
           }
                     className="spotify-card"
                 >
@@ -250,7 +307,7 @@ export default function App() {
                             </div>
 
                             <p className="subtle">
-                                {formatMs(displaySpotify.progressMs)} /{" "}
+                                {formatMs(estimatedProgressMs)} /{" "}
                                 {formatMs(displaySpotify.durationMs)}
                             </p>
                         </>
