@@ -30,6 +30,12 @@ async function fetchJson(url) {
     return res.json();
 }
 
+async function postJson(url) {
+    const res = await fetch(url, { method: "POST" });
+    if (!res.ok) throw new Error(`Failed to post ${url}`);
+    return res.json();
+}
+
 function Card({ title, eyebrow, children, className = "" }) {
     return (
         <section className={`card ${className}`}>
@@ -46,22 +52,14 @@ function getWeatherIcon(condition = "", periodName = "") {
         periodName.toLowerCase().includes("night") ||
         periodName.toLowerCase().includes("tonight");
 
-    if (text.includes("thunder")) {
-        return <WiThunderstorm className="weather-icon storm" />;
-    }
-
-    if (text.includes("snow")) {
-        return <WiSnow className="weather-icon" />;
-    }
+    if (text.includes("thunder")) return <WiThunderstorm className="weather-icon storm" />;
+    if (text.includes("snow")) return <WiSnow className="weather-icon" />;
 
     if (text.includes("fog") || text.includes("haze") || text.includes("smoke")) {
         return <WiFog className="weather-icon" />;
     }
 
-    if (text.includes("shower")) {
-        return <WiShowers className="weather-icon rain" />;
-    }
-
+    if (text.includes("shower")) return <WiShowers className="weather-icon rain" />;
     if (text.includes("rain") || text.includes("drizzle")) {
         return <WiRain className="weather-icon rain" />;
     }
@@ -156,6 +154,10 @@ function formatHour(isoTime) {
     });
 }
 
+function serviceLabel(status) {
+    return status === "active" || status === "online" ? "Online" : "Check";
+}
+
 export default function App() {
     const now = useClock();
 
@@ -166,6 +168,7 @@ export default function App() {
     const [system, setSystem] = useState(null);
     const [spotify, setSpotify] = useState(null);
     const [raspotify, setRaspotify] = useState(null);
+    const [audioVolume, setAudioVolume] = useState(null);
     const [weather, setWeather] = useState(null);
     const [commute, setCommute] = useState(null);
     const [progressTick, setProgressTick] = useState(0);
@@ -180,7 +183,6 @@ export default function App() {
                 ...spotify,
                 ...raspotify,
                 source: "raspotify",
-                volume: spotify ?.volume ?? null,
             };
         }
 
@@ -189,6 +191,12 @@ export default function App() {
             source: spotify ?.source || "spotify",
         };
     }, [spotify, raspotify]);
+
+    const canControlPlayback =
+        spotify ?.connected &&
+            spotify ?.device === "Bass Amp Pi" &&
+                spotify ?.title &&
+                spotify.title !== "Nothing playing";
 
     async function loadStaticData() {
         const [systemData, weatherData, commuteData] = await Promise.all([
@@ -215,15 +223,23 @@ export default function App() {
         }
     }
 
+    async function loadAudioVolumeData() {
+        const volumeData = await fetchJson("/api/audio/volume");
+        setAudioVolume(volumeData);
+    }
+
     async function loadAllDashboardData() {
         await Promise.all([
             loadStaticData(),
             loadSpotifyData().catch(console.error),
             loadRaspotifyData().catch(console.error),
+            loadAudioVolumeData().catch(console.error),
         ]);
     }
 
     async function sendSpotifyCommand(command, body) {
+        if (!canControlPlayback) return;
+
         await fetch(`/api/spotify/${command}`, {
             method: "POST",
             headers: {
@@ -238,6 +254,11 @@ export default function App() {
         ]);
     }
 
+    async function sendAudioVolumeCommand(command) {
+        const volumeData = await postJson(`/api/audio/${command}`);
+        setAudioVolume(volumeData);
+    }
+
     useEffect(() => {
         loadAllDashboardData().catch(console.error);
 
@@ -247,6 +268,7 @@ export default function App() {
 
         const spotifyTimer = setInterval(() => {
             loadSpotifyData().catch(console.error);
+            loadAudioVolumeData().catch(console.error);
         }, 5000);
 
         const staticTimer = setInterval(() => {
@@ -279,6 +301,9 @@ export default function App() {
             Math.round((estimatedProgressMs / displaySpotify.durationMs) * 100)
         )
         : 0;
+
+    const localVolume = audioVolume ?.volume ?? null;
+    const hasLocalVolume = Number.isFinite(localVolume);
 
     return (
         <main className={`page ${theme}`}>
@@ -338,57 +363,84 @@ export default function App() {
                             <p className="subtle">{displaySpotify ?.album || ""}</p>
 
                             {displaySpotify ?.durationMs ? (
-                                <>
-                                    <div className="progress-wrap">
-                                        <div
-                                            className="progress-bar"
-                                            style={{
-                                                width: `${progressPercent}%`,
-                                            }}
-                                        />
+                                <div className={`progress-volume-row ${hasLocalVolume ? "" : "no-volume"}`}>
+                                    <div className="song-progress-column">
+                                        <div className="progress-wrap compact-progress">
+                                            <div
+                                                className="progress-bar"
+                                                style={{
+                                                    width: `${progressPercent}%`,
+                                                }}
+                                            />
+                                        </div>
+
+                                        <p className="subtle">
+                                            {formatMs(estimatedProgressMs)} / {formatMs(displaySpotify.durationMs)}
+                                        </p>
                                     </div>
 
-                                    <p className="subtle">
-                                        {formatMs(estimatedProgressMs)} / {formatMs(displaySpotify.durationMs)}
-                                    </p>
-                                </>
+                                    {hasLocalVolume ? (
+                                        <div className="vertical-volume">
+                                            <button onClick={() => sendAudioVolumeCommand("volume-up")}>+</button>
+
+                                            <div className="volume-meter">
+                                                <div
+                                                    className="volume-fill"
+                                                    style={{ height: `${localVolume}%` }}
+                                                />
+                                            </div>
+
+                                            <span>{localVolume}%</span>
+
+                                            <button onClick={() => sendAudioVolumeCommand("volume-down")}>−</button>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : hasLocalVolume ? (
+                                <div className="vertical-volume standalone-volume">
+                                    <button onClick={() => sendAudioVolumeCommand("volume-up")}>+</button>
+                                    <span>{localVolume}%</span>
+                                    <button onClick={() => sendAudioVolumeCommand("volume-down")}>−</button>
+                                </div>
                             ) : null}
 
                             <div className="spotify-controls">
-                                <button onClick={() => sendSpotifyCommand("previous")}>⏮</button>
+                                <button
+                                    disabled={!canControlPlayback}
+                                    onClick={() => sendSpotifyCommand("previous")}
+                                >
+                                    ⏮
+                </button>
 
                                 {spotify ?.isPlaying ? (
-                                    <button onClick={() => sendSpotifyCommand("pause")}>⏸</button>
+                                    <button
+                                        disabled={!canControlPlayback}
+                                        onClick={() => sendSpotifyCommand("pause")}
+                                    >
+                                        ⏸
+                  </button>
                                 ) : (
-                                        <button onClick={() => sendSpotifyCommand("play")}>▶</button>
+                                        <button
+                                            disabled={!canControlPlayback}
+                                            onClick={() => sendSpotifyCommand("play")}
+                                        >
+                                            ▶
+                  </button>
                                     )}
 
-                                <button onClick={() => sendSpotifyCommand("next")}>⏭</button>
-                            </div>
-
-                            <div className="volume-controls">
                                 <button
-                                    onClick={() =>
-                                        sendSpotifyCommand("volume", {
-                                            volume: Math.max(0, (spotify ?.volume ?? 50) - 10),
-                                        })
-                                    }
+                                    disabled={!canControlPlayback}
+                                    onClick={() => sendSpotifyCommand("next")}
                                 >
-                                    −
-                </button>
-
-                                <span>{spotify ?.volume ?? "--"}%</span>
-
-                                <button
-                                    onClick={() =>
-                                        sendSpotifyCommand("volume", {
-                                            volume: Math.min(100, (spotify ?.volume ?? 50) + 10),
-                                        })
-                                    }
-                                >
-                                    +
+                                    ⏭
                 </button>
                             </div>
+
+                            {!canControlPlayback && displaySpotify ?.source === "raspotify" ? (
+                                <p className="control-note">
+                                    Display only — controlled by another Spotify account
+                </p>
+                            ) : null}
 
                             <p className="subtle">
                                 {displaySpotify ?.device || "Bass Amp Pi"}
@@ -461,15 +513,71 @@ export default function App() {
                 </Card>
 
                 <Card title="Pi Status" eyebrow={system ?.hostname || "System"}>
-                    <p className="big">{system ?.cpuTemp || "--"}</p>
-                    <p className="muted">
-                        {system
-                            ? `${system.memory.usedMb}MB / ${system.memory.totalMb}MB used`
-                            : "Loading..."}
-                    </p>
-                    <p className="subtle">
-                        {system ? `Load: ${system.loadavg.join(" / ")}` : ""}
-                    </p>
+                    <div className="pi-status-top">
+                        <div>
+                            <p className="big">{system ?.cpuTemp || "--"}</p>
+                            <p className="muted">{system ?.thermalMessage || "Loading..."}</p>
+                        </div>
+
+                        <span className={`status-badge ${system ?.thermalStatus || "unknown"}`}>
+                            {system ?.thermalStatus || "unknown"}
+                        </span>
+                    </div>
+
+                    <div className="stat-grid">
+                        <div className="stat-tile">
+                            <p className="stat-label">Memory</p>
+                            <p className="stat-value">{system ? `${system.memory.usedPercent}%` : "--"}</p>
+                            <p className="stat-sub">
+                                {system ? `${system.memory.usedMb} / ${system.memory.totalMb} MB` : "Loading"}
+                            </p>
+                        </div>
+
+                        <div className="stat-tile">
+                            <p className="stat-label">Disk</p>
+                            <p className="stat-value">
+                                {system ?.disk ?.usedPercent != null ? `${system.disk.usedPercent}%` : "--"}
+                            </p>
+                            <p className="stat-sub">
+                                {system ?.disk ?.usedGb != null
+                                    ? `${system.disk.usedGb} / ${system.disk.totalGb} GB`
+                                    : "Loading"}
+                            </p>
+                        </div>
+
+                        <div className="stat-tile">
+                            <p className="stat-label">Uptime</p>
+                            <p className="stat-value">{system ?.uptimeLabel || "--"}</p>
+                            <p className="stat-sub">Since last reboot</p>
+                        </div>
+
+                        <div className="stat-tile">
+                            <p className="stat-label">Load</p>
+                            <p className="stat-value">{system ?.loadavg ?.[0] ?? "--"}</p>
+                            <p className="stat-sub">
+                                {system ? system.loadavg.join(" / ") : "Loading"}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="service-row">
+                        <span>Dashboard</span>
+                        <strong>{serviceLabel(system ?.services ?.dashboard)}</strong>
+                    </div>
+
+                    <div className="service-row">
+                        <span>Raspotify</span>
+                        <strong>{serviceLabel(system ?.services ?.raspotify)}</strong>
+                    </div>
+
+                    <div className="service-row">
+                        <span>Throttle</span>
+                        <strong>{system ?.throttling ?.messages ?.[0] || "Loading"}</strong>
+                    </div>
+
+                    {system ?.network ?.ipAddresses ?.[0] ?.address ? (
+                        <p className="subtle">IP: {system.network.ipAddresses[0].address}</p>
+                    ) : null}
                 </Card>
             </section>
         </main>

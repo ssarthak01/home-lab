@@ -3,7 +3,7 @@
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
       sans-serif;
-    background: #f4f7fb;
+    background: #e8eef5;
     color: #0f172a;
   }
   
@@ -38,6 +38,7 @@
       radial-gradient(circle at 85% 18%, rgba(96, 165, 250, 0.28), transparent 20rem),
       linear-gradient(135deg, rgba(224, 242, 254, 0.96), rgba(239, 246, 255, 0.92) 45%, rgba(219, 234, 254, 0.9)),
       rgba(239, 246, 255, 0.94);
+  
     min-height: 100vh;
     padding: 26px;
     color: var(--text);
@@ -66,9 +67,11 @@
       linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(15, 23, 42, 0.76)),
       rgba(15, 23, 42, 0.72);
     --weather-bg:
-      radial-gradient(circle at 18% 20%, rgba(250, 204, 21, 0.12), transparent 18rem),
-      linear-gradient(135deg, rgba(30, 41, 59, 0.84), rgba(15, 23, 42, 0.78)),
-      rgba(15, 23, 42, 0.72);
+      radial-gradient(circle at 16% 24%, rgba(250, 204, 21, 0.12), transparent 14rem),
+      radial-gradient(circle at 85% 18%, rgba(96, 165, 250, 0.18), transparent 20rem),
+      linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.84)),
+      rgba(15, 23, 42, 0.82);
+  
     background:
       radial-gradient(circle at top left, rgba(34, 197, 94, 0.22), transparent 32rem),
       radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.18), transparent 36rem),
@@ -157,8 +160,8 @@
     border-radius: 26px;
     background: var(--card);
     box-shadow:
-        0 18px 48px var(--shadow),
-        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      0 18px 48px var(--shadow),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
     backdrop-filter: blur(22px);
   }
   
@@ -168,13 +171,25 @@
   
   .compact-spotify {
     grid-row: auto;
-    min-height: 380px;
+    min-height: 390px;
   }
   
   .weather-card {
     min-height: 380px;
     background: var(--weather-bg);
     border-color: rgba(59, 130, 246, 0.18);
+  }
+  
+  .weather-card .hour-card,
+  .weather-card .mini-panel {
+    background: rgba(239, 246, 255, 0.72);
+    border-color: rgba(59, 130, 246, 0.16);
+  }
+  
+  .page.dark .weather-card .hour-card,
+  .page.dark .weather-card .mini-panel {
+    background: rgba(2, 6, 23, 0.32);
+    border-color: rgba(148, 163, 184, 0.16);
   }
   
   h2 {
@@ -186,20 +201,21 @@
   
   .spotify-layout {
     display: grid;
-    grid-template-columns: 172px minmax(0, 1fr);
-    gap: 18px;
-    align-items: start;
+    grid-template-columns: minmax(270px, 42%) minmax(0, 1fr);
+    gap: 22px;
+    align-items: stretch;
   }
   
   .album-art-img,
   .album-art {
     display: grid;
     place-items: center;
-    width: 172px;
-    height: 172px;
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
     aspect-ratio: 1;
     margin: 0;
-    border-radius: 24px;
+    border-radius: 30px;
     box-shadow:
       0 18px 50px var(--shadow),
       0 0 60px rgba(34, 197, 94, 0.14);
@@ -214,12 +230,14 @@
       radial-gradient(circle at 30% 30%, #22c55e, transparent 42%),
       linear-gradient(135deg, #0f172a, #020617);
     color: rgba(255, 255, 255, 0.86);
-    font-size: 74px;
+    font-size: 86px;
     box-shadow: inset 0 0 80px rgba(255, 255, 255, 0.08);
   }
   
   .spotify-details {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
   
   .big {
@@ -252,14 +270,30 @@
     font-size: 14px;
   }
   
+  .progress-volume-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 64px;
+    gap: 14px;
+    align-items: center;
+    margin-top: 16px;
+    max-width: 440px;
+  }
+  
+  .song-progress-column {
+    min-width: 0;
+  }
+  
   .progress-wrap {
     width: 100%;
     height: 9px;
-    margin-top: 16px;
-    margin-bottom: 10px;
+    margin: 0 0 10px;
     overflow: hidden;
     border-radius: 999px;
     background: rgba(148, 163, 184, 0.28);
+  }
+  
+  .compact-progress {
+    max-width: 340px;
   }
   
   .progress-bar {
@@ -269,16 +303,67 @@
     box-shadow: 0 0 18px rgba(34, 197, 94, 0.7);
   }
   
-  .spotify-controls,
-  .volume-controls {
+  .vertical-volume {
+    display: grid;
+    grid-template-rows: 32px 82px auto 32px;
+    justify-items: center;
+    align-items: center;
+    gap: 6px;
+  }
+  
+  .vertical-volume button {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--button);
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+  
+  .volume-meter {
+    position: relative;
+    width: 12px;
+    height: 82px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.28);
+  }
+  
+  .volume-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    min-height: 2px;
+    border-radius: inherit;
+    background: #22c55e;
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.7);
+  }
+  
+  .vertical-volume span {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 900;
+  }
+  
+  .standalone-volume {
+    width: 64px;
+    margin-top: 14px;
+  }
+  
+  .spotify-controls {
     display: flex;
     align-items: center;
     gap: 10px;
     margin-top: 14px;
   }
   
-  .spotify-controls button,
-  .volume-controls button {
+  .spotify-controls button {
     display: grid;
     place-items: center;
     min-width: 46px;
@@ -293,26 +378,31 @@
     transition:
       transform 160ms ease,
       background 160ms ease,
-      border-color 160ms ease;
+      border-color 160ms ease,
+      opacity 160ms ease;
   }
   
-  .spotify-controls button:hover,
-  .volume-controls button:hover {
+  .spotify-controls button:hover:not(:disabled),
+  .vertical-volume button:hover {
     transform: translateY(-1px);
     background: var(--button-hover);
     border-color: rgba(34, 197, 94, 0.42);
   }
   
-  .spotify-controls button:active,
-  .volume-controls button:active {
+  .spotify-controls button:active:not(:disabled),
+  .vertical-volume button:active {
     transform: translateY(0) scale(0.98);
   }
   
-  .volume-controls span {
-    min-width: 56px;
-    text-align: center;
-    color: var(--muted);
-    font-size: 16px;
+  .spotify-controls button:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+  
+  .control-note {
+    margin: 10px 0 0;
+    color: var(--subtle);
+    font-size: 13px;
     font-weight: 800;
   }
   
@@ -348,12 +438,6 @@
     color: #0284c7;
     animation: rain-bob 2.4s ease-in-out infinite;
   }
-
-  .weather-card .hour-card,
-.weather-card .mini-panel {
-  background: rgba(239, 246, 255, 0.72);
-  border-color: rgba(59, 130, 246, 0.16);
-}
   
   .weather-icon.storm {
     color: #8b5cf6;
@@ -472,6 +556,116 @@
     font-size: 36px;
   }
   
+  .pi-status-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  
+  .status-badge {
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.18);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  
+  .status-badge.good {
+    background: rgba(34, 197, 94, 0.16);
+    color: #15803d;
+  }
+  
+  .status-badge.warm {
+    background: rgba(250, 204, 21, 0.22);
+    color: #a16207;
+  }
+  
+  .status-badge.hot {
+    background: rgba(249, 115, 22, 0.2);
+    color: #c2410c;
+  }
+  
+  .status-badge.critical {
+    background: rgba(239, 68, 68, 0.2);
+    color: #b91c1c;
+  }
+  
+  .page.dark .status-badge.good {
+    color: #86efac;
+  }
+  
+  .page.dark .status-badge.warm {
+    color: #fde68a;
+  }
+  
+  .page.dark .status-badge.hot {
+    color: #fdba74;
+  }
+  
+  .page.dark .status-badge.critical {
+    color: #fca5a5;
+  }
+  
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 18px;
+  }
+  
+  .stat-tile {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--panel);
+  }
+  
+  .stat-label {
+    margin: 0;
+    color: var(--eyebrow);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  
+  .stat-value {
+    margin: 6px 0 0;
+    color: var(--text);
+    font-size: 24px;
+    line-height: 1;
+    font-weight: 900;
+    letter-spacing: -0.04em;
+  }
+  
+  .stat-sub {
+    margin: 6px 0 0;
+    color: var(--subtle);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  
+  .service-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 14px;
+  }
+  
+  .service-row strong {
+    color: var(--text);
+  }
+  
   @keyframes pulse-sun {
     0%,
     100% {
@@ -532,13 +726,12 @@
     }
   
     .spotify-layout {
-      grid-template-columns: 150px minmax(0, 1fr);
+      grid-template-columns: 220px minmax(0, 1fr);
     }
   
     .album-art-img,
     .album-art {
-      width: 150px;
-      height: 150px;
+      min-height: 220px;
     }
   }
   
@@ -558,11 +751,19 @@
     .spotify-layout {
       grid-template-columns: 1fr;
     }
+
+    .progress-volume-row.no-volume {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      
+      .progress-volume-row.no-volume .compact-progress {
+        max-width: 100%;
+      }
   
     .album-art-img,
     .album-art {
-      width: 180px;
-      height: 180px;
+      width: 100%;
+      min-height: 240px;
     }
   
     .hourly-forecast {

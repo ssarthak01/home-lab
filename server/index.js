@@ -12,13 +12,194 @@ const isProduction = process.env.NODE_ENV === "production";
 
 app.use(express.json());
 
-function getCpuTemp() {
+function runCommand(command) {
     try {
-        const output = execSync("vcgencmd measure_temp").toString().trim();
-        return output.replace("temp=", "");
+        return execSync(command, { encoding: "utf8" }).trim();
     } catch {
-        return "unavailable locally";
+        return null;
     }
+}
+
+function getCpuTempDetails() {
+    const output = runCommand("vcgencmd measure_temp");
+
+    if (!output) {
+        return {
+            cpuTemp: "unavailable locally",
+            cpuTempC: null,
+            thermalStatus: "unknown",
+            thermalMessage: "Temperature unavailable",
+        };
+    }
+
+    const match = output.match(/temp=([\d.]+)/);
+    const cpuTempC = match ? Number(match[1]) : null;
+
+    let thermalStatus = "unknown";
+    let thermalMessage = "Temperature unavailable";
+
+    if (Number.isFinite(cpuTempC)) {
+        if (cpuTempC < 60) {
+            thermalStatus = "good";
+            thermalMessage = "Cool and healthy";
+        } else if (cpuTempC < 70) {
+            thermalStatus = "warm";
+            thermalMessage = "Warm but fine";
+        } else if (cpuTempC < 80) {
+            thermalStatus = "hot";
+            thermalMessage = "Hot, improve airflow";
+        } else {
+            thermalStatus = "critical";
+            thermalMessage = "Thermal throttling risk";
+        }
+    }
+
+    return {
+        cpuTemp: Number.isFinite(cpuTempC)
+            ? `${cpuTempC.toFixed(1)}°C`
+            : output.replace("temp=", ""),
+        cpuTempC,
+        thermalStatus,
+        thermalMessage,
+    };
+}
+
+function getThrottling() {
+    const output = runCommand("vcgencmd get_throttled");
+
+    if (!output) {
+        return {
+            raw: null,
+            isThrottledNow: false,
+            hasThrottledBefore: false,
+            messages: ["Unavailable"],
+        };
+    }
+
+    const hex = output.replace("throttled=", "");
+    const value = Number.parseInt(hex, 16);
+
+    const flags = [
+        { bit: 0, message: "Under-voltage now" },
+        { bit: 1, message: "Frequency capped now" },
+        { bit: 2, message: "Throttled now" },
+        { bit: 3, message: "Soft temperature limit now" },
+        { bit: 16, message: "Under-voltage occurred" },
+        { bit: 17, message: "Frequency capped occurred" },
+        { bit: 18, message: "Throttling occurred" },
+        { bit: 19, message: "Soft temperature limit occurred" },
+    ];
+
+    const messages = flags
+        .filter((flag) => value & (1 << flag.bit))
+        .map((flag) => flag.message);
+
+    return {
+        raw: output,
+        isThrottledNow: Boolean(value & (1 << 2)),
+        hasThrottledBefore: Boolean(value & (1 << 18)),
+        messages: messages.length ? messages : ["No throttling reported"],
+    };
+}
+
+function getDiskUsage() {
+    const output = runCommand("df -k / | tail -1");
+
+    if (!output) {
+        return {
+            totalGb: null,
+            usedGb: null,
+            availableGb: null,
+            usedPercent: null,
+            label: "unavailable",
+        };
+    }
+
+    const parts = output.split(/\s+/);
+    const totalKb = Number(parts[1]);
+    const usedKb = Number(parts[2]);
+    const availableKb = Number(parts[3]);
+    const usedPercent = Number((parts[4] || "").replace("%", ""));
+
+    return {
+        totalGb: Number.isFinite(totalKb)
+            ? Number((totalKb / 1024 / 1024).toFixed(1))
+            : null,
+        usedGb: Number.isFinite(usedKb)
+            ? Number((usedKb / 1024 / 1024).toFixed(1))
+            : null,
+        availableGb: Number.isFinite(availableKb)
+            ? Number((availableKb / 1024 / 1024).toFixed(1))
+            : null,
+        usedPercent: Number.isFinite(usedPercent) ? usedPercent : null,
+        label: Number.isFinite(usedPercent) ? `${usedPercent}% used` : "unavailable",
+    };
+}
+
+function getServiceStatus(serviceName) {
+    const output = runCommand(`systemctl is-active ${serviceName}`);
+    return output || "unknown";
+}
+
+function getIpAddresses() {
+    const interfaces = os.networkInterfaces();
+
+    return Object.entries(interfaces)
+        .flatMap(([name, addresses]) =>
+            (addresses || [])
+                .filter((address) => address.family === "IPv4" && !address.internal)
+                .map((address) => ({
+                    interface: name,
+                    address: address.address,
+                }))
+        );
+}
+
+function formatUptime(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+}
+
+function getMasterVolume() {
+    const output = runCommand("amixer get Master");
+
+    if (!output) {
+        return {
+            connected: false,
+            mixer: "Master",
+            volume: null,
+            muted: null,
+            raw: null,
+            error: "Could not read Master mixer",
+        };
+    }
+
+    const volumeMatch = output.match(/\[(\d+)%\]/);
+    const muted = output.includes("[off]");
+    const volume = volumeMatch ? Number(volumeMatch[1]) : null;
+
+    return {
+        connected: true,
+        mixer: "Master",
+        volume,
+        muted,
+        raw: output,
+    };
+}
+
+function changeMasterVolume(direction) {
+    const command =
+        direction === "up"
+            ? "amixer set Master 5%+"
+            : "amixer set Master 5%-";
+
+    runCommand(command);
+    return getMasterVolume();
 }
 
 app.get("/api/health", (req, res) => {
@@ -32,20 +213,46 @@ app.get("/api/health", (req, res) => {
 app.get("/api/system", (req, res) => {
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const uptimeSeconds = Math.round(os.uptime());
+    const tempDetails = getCpuTempDetails();
 
     res.json({
         hostname: os.hostname(),
         platform: os.platform(),
         arch: os.arch(),
-        uptimeSeconds: Math.round(os.uptime()),
+        uptimeSeconds,
+        uptimeLabel: formatUptime(uptimeSeconds),
         loadavg: os.loadavg().map((n) => Number(n.toFixed(2))),
         memory: {
             totalMb: Math.round(totalMem / 1024 / 1024),
             freeMb: Math.round(freeMem / 1024 / 1024),
-            usedMb: Math.round((totalMem - freeMem) / 1024 / 1024),
+            usedMb: Math.round(usedMem / 1024 / 1024),
+            usedPercent: Math.round((usedMem / totalMem) * 100),
         },
-        cpuTemp: getCpuTemp(),
+        disk: getDiskUsage(),
+        network: {
+            ipAddresses: getIpAddresses(),
+        },
+        services: {
+            dashboard: "online",
+            raspotify: getServiceStatus("raspotify"),
+        },
+        throttling: getThrottling(),
+        ...tempDetails,
     });
+});
+
+app.get("/api/audio/volume", (req, res) => {
+    res.json(getMasterVolume());
+});
+
+app.post("/api/audio/volume-up", (req, res) => {
+    res.json(changeMasterVolume("up"));
+});
+
+app.post("/api/audio/volume-down", (req, res) => {
+    res.json(changeMasterVolume("down"));
 });
 
 const SPOTIFY_SCOPES = [
@@ -108,10 +315,7 @@ async function spotifyRequest(endpoint, options = {}) {
         throw new Error(`Spotify request failed: ${response.status} ${text}`);
     }
 
-    if (response.status === 204) {
-        return null;
-    }
-
+    if (response.status === 204) return null;
     return response.json();
 }
 
@@ -307,10 +511,7 @@ app.get("/api/raspotify", (req, res) => {
 
 app.post("/api/spotify/play", async (req, res) => {
     try {
-        await spotifyRequest("/me/player/play", {
-            method: "PUT",
-        });
-
+        await spotifyRequest("/me/player/play", { method: "PUT" });
         res.json({ ok: true });
     } catch (error) {
         console.error(error);
@@ -320,10 +521,7 @@ app.post("/api/spotify/play", async (req, res) => {
 
 app.post("/api/spotify/pause", async (req, res) => {
     try {
-        await spotifyRequest("/me/player/pause", {
-            method: "PUT",
-        });
-
+        await spotifyRequest("/me/player/pause", { method: "PUT" });
         res.json({ ok: true });
     } catch (error) {
         console.error(error);
@@ -333,10 +531,7 @@ app.post("/api/spotify/pause", async (req, res) => {
 
 app.post("/api/spotify/next", async (req, res) => {
     try {
-        await spotifyRequest("/me/player/next", {
-            method: "POST",
-        });
-
+        await spotifyRequest("/me/player/next", { method: "POST" });
         res.json({ ok: true });
     } catch (error) {
         console.error(error);
@@ -346,33 +541,8 @@ app.post("/api/spotify/next", async (req, res) => {
 
 app.post("/api/spotify/previous", async (req, res) => {
     try {
-        await spotifyRequest("/me/player/previous", {
-            method: "POST",
-        });
-
+        await spotifyRequest("/me/player/previous", { method: "POST" });
         res.json({ ok: true });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ ok: false, error: error.message });
-    }
-});
-
-app.post("/api/spotify/volume", async (req, res) => {
-    try {
-        const volume = Number(req.body.volume);
-
-        if (!Number.isFinite(volume) || volume < 0 || volume > 100) {
-            return res.status(400).json({
-                ok: false,
-                error: "volume must be a number between 0 and 100",
-            });
-        }
-
-        await spotifyRequest(`/me/player/volume?volume_percent=${volume}`, {
-            method: "PUT",
-        });
-
-        res.json({ ok: true, volume });
     } catch (error) {
         console.error(error);
         res.status(500).json({ ok: false, error: error.message });
